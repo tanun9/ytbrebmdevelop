@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import urllib.request
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -29,6 +30,8 @@ from ..models.scan_state_store import ScanStateStore
 EXECUTOR         = ThreadPoolExecutor(max_workers=60)
 SCAN_STATE_STORE = ScanStateStore()
 SCAN_STATE: dict = SCAN_STATE_STORE.state
+_MONITOR_INTERVAL_SEC = 300
+_MONITOR_TOKEN = 0
 
 _HEAD_TIMEOUT = 4
 _YDL_TIMEOUT  = 8
@@ -176,6 +179,91 @@ def fetch_avatar_background(item: dict) -> None:
         pass
 
 
+# ── 监测 ─────────────────────────────────────
+
+def classify_ytdlp_exception(e: Exception) -> str:
+    """
+    根据 yt-dlp 抛出的异常消息判断频道状态。
+
+    返回值：
+      offline    — 频道当前未开播
+      upcoming   — 预定直播尚未开始
+      ended      — 直播已结束（转为录播）
+      terminated — 账号已被封禁
+      js_error   — 本地缺少 JS 运行时（环境问题）
+      unknown    — 无法识别的异常
+    """
+    msg = str(e)
+
+    if "not currently live" in msg:
+        return "offline"
+
+    if "will begin in" in msg:
+        return "upcoming"
+
+    if "has ended" in msg:
+        return "ended"
+
+    if "This account has been terminated" in msg:
+        return "terminated"
+
+    if "No supported JavaScript runtime" in msg:
+        return "js_error"
+
+    return "unknown"
+
+
+def _recheck_live_ytdlp(item: dict) -> dict | None:
+    """
+    用 yt-dlp 直接检测 channel_live_url 主页是否仍在直播。
+
+    返回规则：
+      is_live=True                          → 保留卡片
+      is_live=False 或 info 为空            → 移除卡片
+      offline / ended / upcoming / terminated → 明确下播，移除卡片
+      js_error / unknown 异常               → 保守保留
+    """
+    url = (item.get("channel_live_url") or item.get("url") or "").strip()
+    if not url:
+        return item  # 无链接，保守保留
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "socket_timeout": _YDL_TIMEOUT,
+    }
+
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        if info and info.get("is_live"):
+            return item  # ✅ 仍在播
+
+        return None  # ❌ 明确不在播（录播或无直播）
+
+    except Exception as e:
+        state = classify_ytdlp_exception(e)
+        _log("debug", "recheck [%s] state=%s | %s", url, state, e)
+
+        # 明确下播：移除卡片
+        if state in ("offline", "ended", "upcoming", "terminated"):
+            return None
+
+        # 环境问题：保守保留
+        if state == "js_error":
+            return item
+
+        # 未知异常：保守保留
+        return item
+
+
+def _monitor_recheck_sync(item: dict) -> dict | None:
+    """监控复检入口，供线程池调用。"""
+    return _recheck_live_ytdlp(item)
+
+
 # ── 频道标识规范化 ────────────────────────────────────────────────────────────
 
 def normalize_channel_live_url(q: str) -> tuple[str, str]:
@@ -214,6 +302,8 @@ async def start_scan_task() -> None:
         SCAN_STATE_STORE.set_running(False)
         return
 
+    global _MONITOR_TOKEN
+    _MONITOR_TOKEN += 1
     SCAN_STATE_STORE.reset_for_new_scan()
     SCAN_STATE_STORE.set_total(len(channels))
     loop       = asyncio.get_running_loop()
@@ -244,7 +334,7 @@ async def start_scan_task() -> None:
                     )
 
             if tasks:
-                results     = await asyncio.gather(*tasks)
+                results      = await asyncio.gather(*tasks)
                 live_results = [r for r in results if r]
                 SCAN_STATE_STORE.add_results(live_results)
                 for item in live_results:
@@ -253,6 +343,47 @@ async def start_scan_task() -> None:
             SCAN_STATE_STORE.add_progress(len(batch))
     finally:
         SCAN_STATE_STORE.set_running(False)
+        asyncio.create_task(start_live_monitor_task(_MONITOR_TOKEN))
+
+
+async def start_live_monitor_task(token: int) -> None:
+    """
+    扫描结束后每 5 分钟复检一轮在线卡片。
+    并发数限制为 3，直接调用 yt-dlp 检测 /live 主页。
+    直到卡片清空或下一轮全量扫描开始时退出。
+    """
+    if token != _MONITOR_TOKEN:
+        return
+
+    SCAN_STATE_STORE.set_monitoring(True)
+    loop = asyncio.get_running_loop()
+    semaphore = asyncio.Semaphore(3)
+
+    async def _recheck_with_limit(item: dict) -> dict | None:
+        async with semaphore:
+            return await loop.run_in_executor(
+                EXECUTOR, _monitor_recheck_sync, item
+            )
+
+    try:
+        await asyncio.sleep(_MONITOR_INTERVAL_SEC)
+        while token == _MONITOR_TOKEN and not SCAN_STATE_STORE.is_running:
+            current_items = list(SCAN_STATE["results"])
+            if not current_items:
+                break
+
+            tasks     = [_recheck_with_limit(item) for item in current_items]
+            refreshed = await asyncio.gather(*tasks)
+
+            live_results = [r for r in refreshed if r]
+            SCAN_STATE_STORE.replace_results(live_results)
+
+            if not live_results:
+                break
+            await asyncio.sleep(_MONITOR_INTERVAL_SEC)
+    finally:
+        if token == _MONITOR_TOKEN:
+            SCAN_STATE_STORE.set_monitoring(False)
 
 
 def _load_channels_csv(file_path: str) -> list[dict]:
