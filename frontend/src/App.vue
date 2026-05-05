@@ -60,16 +60,32 @@
           </span>
         </button>
         <div class="bg-menu-wrap">
-          <button class="icon-btn" title="背景设置" @click.stop="toggleBgMenu">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <button class="icon-btn" :class="{ loading: bgSaving }" title="背景设置" @click.stop="toggleBgMenu">
+            <!-- 上传中显示 spinner，否则显示上传图标 -->
+            <svg v-if="bgSaving" class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 16V8"/>
               <path d="M8.5 11.5 12 8l3.5 3.5"/>
               <path d="M21 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-2"/>
             </svg>
           </button>
           <div v-if="bgMenuOpen" class="bg-menu" @click.stop>
-            <button class="bg-menu-item" @click="handleUploadClick">上传背景</button>
-            <button class="bg-menu-item danger" @click="handleClearClick">清除背景</button>
+            <div v-if="appState.userBackgroundUrl" class="bg-preview-wrap">
+              <img class="bg-preview" :src="appState.userBackgroundUrl" alt="当前背景" />
+            </div>
+            <button class="bg-menu-item" :disabled="bgSaving" @click="handleUploadClick">
+              {{ appState.userBackgroundUrl ? '更换背景' : '上传背景' }}
+            </button>
+            <button
+              v-if="appState.userBackgroundUrl"
+              class="bg-menu-item danger"
+              :disabled="bgSaving"
+              @click="handleClearClick"
+            >
+              清除背景
+            </button>
           </div>
         </div>
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
@@ -113,6 +129,7 @@ import MonitorView from './components/MonitorView.vue'
 import PlayerView from './components/PlayerView.vue'
 import { appState } from './stores/appState'
 import { useTheme } from './composables/useTheme'
+import { useBackground } from './composables/useBackground'
 
 const activeTab = ref('monitor')
 const playerViewEl = ref(null)
@@ -132,11 +149,14 @@ const bgMenuOpen = ref(false)
 
 // theme
 const { currentTheme, themeList, setTheme } = useTheme()
+
+// background persistence
+const { saving: bgSaving, error: bgError, restoreBackground, saveBackground, clearBackground } = useBackground()
+
 const bgOverlayStyle = computed(() => {
   if (!appState.userBackgroundUrl) {
     return { opacity: 0 }
   }
-
   return {
     backgroundImage: `url(${appState.userBackgroundUrl})`,
     opacity: 0.38,
@@ -156,29 +176,25 @@ function handleUploadClick() {
   triggerBackgroundUpload()
 }
 
-function handleClearClick() {
+async function handleClearClick() {
   bgMenuOpen.value = false
-  clearBackground()
+  await clearBackground()
+  showToast('背景已清除')
 }
 
-function onBackgroundSelected(event) {
+async function onBackgroundSelected(event) {
   const file = event.target.files?.[0]
   if (!file) return
 
-  const reader = new FileReader()
-  reader.onload = () => {
-    appState.userBackgroundUrl = String(reader.result || '')
-    localStorage.setItem('yv_user_background', appState.userBackgroundUrl)
-    showToast('背景已保存')
-    event.target.value = ''
-  }
-  reader.readAsDataURL(file)
-}
+  // Reset input early so same file can be re-selected later
+  event.target.value = ''
 
-function clearBackground() {
-  appState.userBackgroundUrl = ''
-  localStorage.removeItem('yv_user_background')
-  showToast('背景已清除')
+  const ok = await saveBackground(file)
+  if (ok) {
+    showToast('背景已保存')
+  } else {
+    showToast(bgError.value || '背景保存失败')
+  }
 }
 
 async function toggleFullscreen() {
@@ -247,14 +263,12 @@ function onGlobalClick() {
   bgMenuOpen.value = false
 }
 
-onMounted(() => {
-  const savedBackground = localStorage.getItem('yv_user_background')
-  if (savedBackground) {
-    appState.userBackgroundUrl = savedBackground
-  }
+onMounted(async () => {
   applyScale()
   window.addEventListener('resize', onResize)
   window.addEventListener('click', onGlobalClick)
+  // 恢复持久化背景
+  await restoreBackground()
 })
 
 onUnmounted(() => {
@@ -262,9 +276,6 @@ onUnmounted(() => {
   window.removeEventListener('click', onGlobalClick)
   clearTimeout(toastTimer)
   clearTimeout(scaleTimer)
-  if (appState.userBackgroundUrl) {
-    URL.revokeObjectURL(appState.userBackgroundUrl)
-  }
 })
 </script>
 
@@ -314,10 +325,17 @@ onUnmounted(() => {
   border-radius: 8px;
   display: inline-flex;
   cursor: pointer;
+  transition: color 0.2s, background 0.2s;
 }
 
 .icon-btn svg { width: 16px; height: 16px; }
 .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+.icon-btn.loading { color: var(--primary); cursor: default; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.8s linear infinite; }
 
 .bg-menu-wrap {
   position: relative;
@@ -327,7 +345,7 @@ onUnmounted(() => {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  min-width: 104px;
+  min-width: 120px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -338,6 +356,19 @@ onUnmounted(() => {
   z-index: 80;
 }
 
+/* 缩略图预览 */
+.bg-preview-wrap {
+  padding: 4px 4px 2px;
+}
+.bg-preview {
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
 .bg-menu-item {
   border: none;
   background: transparent;
@@ -346,9 +377,11 @@ onUnmounted(() => {
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 0.85rem;
 }
 
-.bg-menu-item:hover { background: rgba(255,255,255,0.08); }
+.bg-menu-item:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+.bg-menu-item:disabled { opacity: 0.4; cursor: default; }
 .bg-menu-item.danger { color: #ff9fae; }
 
 .hidden-input { display: none; }
@@ -376,7 +409,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 0.5rem 1rem;
-  background: var(--surface); /* 确保背景色统一 */
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
@@ -411,7 +444,6 @@ onUnmounted(() => {
 
 .tab-btn:hover {
   color: var(--text);
-  /* 同样的悬浮上移效果 */
   transform: translateY(-1px);
   background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
@@ -443,7 +475,6 @@ onUnmounted(() => {
 }
 
 .theme-pill:hover {
-  /* 药丸按钮 */
   transform: translateY(-0.5px);
   background: rgba(255, 255, 255, 0.05);
 }
