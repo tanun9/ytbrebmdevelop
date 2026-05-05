@@ -169,7 +169,7 @@ function onBackgroundSelected(event) {
   reader.onload = () => {
     appState.userBackgroundUrl = String(reader.result || '')
     localStorage.setItem('yv_user_background', appState.userBackgroundUrl)
-    showToast('背景已更新并保存')
+    showToast('背景已保存')
     event.target.value = ''
   }
   reader.readAsDataURL(file)
@@ -262,6 +262,9 @@ onUnmounted(() => {
   window.removeEventListener('click', onGlobalClick)
   clearTimeout(toastTimer)
   clearTimeout(scaleTimer)
+  if (appState.userBackgroundUrl) {
+    URL.revokeObjectURL(appState.userBackgroundUrl)
+  }
 })
 </script>
 
