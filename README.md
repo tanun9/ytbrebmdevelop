@@ -80,7 +80,6 @@ cd frontend && npm run preview
 - `app.log`
 - `channel_avatar_cache.json`
 - `avatar_cache/`
-- `scan_state.json`
 - `window_config.json`
 - `webview_data/`
 
