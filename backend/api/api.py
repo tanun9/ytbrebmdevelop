@@ -61,8 +61,7 @@ def build_app(resource_dir: str, app_dir_fn) -> FastAPI:
 
     @app.get("/api/channels")
     def get_channels():
-        file_path = os.path.join(app_dir_fn(), "channels.csv")
-        if not os.path.exists(file_path):
+        if not os.path.isdir(app_dir_fn()):
             return {"channels": []}
         return {"channels": _svc.load_channels_for_search(app_dir_fn)}
 
