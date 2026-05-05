@@ -5,7 +5,7 @@ YouTube 直播检测逻辑
 
 公共接口
 --------
-SCAN_STATE                      全局扫描状态字典（由 api.py 读取）
+SCAN_STATE_STORE                全局扫描状态存储（由 api.py 通过 get_snapshot() 读取）
 check_live_sync(...)            同步检测单个频道（在线程池中调用）
 normalize_channel_live_url(q)   将各种频道标识统一转为 /live URL
 start_scan_task()               asyncio 协程，批量扫描 channels.csv
@@ -29,7 +29,7 @@ from ..models.scan_state_store import ScanStateStore
 
 EXECUTOR         = ThreadPoolExecutor(max_workers=60)
 SCAN_STATE_STORE = ScanStateStore()
-SCAN_STATE: dict = SCAN_STATE_STORE.state
+# SCAN_STATE dict alias removed: state is now a deep-copy snapshot, use SCAN_STATE_STORE methods directly
 _MONITOR_INTERVAL_SEC = 300
 _MONITOR_TOKEN = 0
 
@@ -133,7 +133,6 @@ def check_live_sync(
             if info and info.get("is_live"):
                 fallback_mark   = handle_mark or (f"@{channel_id}" if channel_id else "@unknown")
                 real_channel_id = channel_id or info.get("channel_id") or info.get("uploader_id") or ""
-                avatar_cached   = _ac.get_cached_avatar(real_channel_id)
                 raw_title = info.get("title") or ""
                 clean_title = re.sub(
                     r'[\s　]*[（(【]\s*\d{4}[-/年]\d{1,2}[-/月]\d{1,2}'
@@ -146,7 +145,6 @@ def check_live_sync(
                     "name":   _clean_display_name(name_raw, fallback_mark),
                     "title":  clean_title,
                     "url":    f"https://www.youtube.com/watch?v={info.get('id')}",
-                    "avatar": avatar_cached or "",
                     "channel_live_url": url,
                 }
     except Exception:
@@ -155,26 +153,19 @@ def check_live_sync(
 
 
 def fetch_avatar_background(item: dict) -> None:
+    """后台预热头像缓存。avatar 是派生字段，由 API 层在响应时注入，此处只写缓存。"""
     try:
         channel_id = (item.get("id") or "").strip()
         if not channel_id:
             return
-
-        avatar_cached = _ac.get_cached_avatar(channel_id)
-        if avatar_cached:
-            avatar = avatar_cached
-        else:
-            channel_live_url = (item.get("channel_live_url") or "").strip()
-            if not channel_live_url:
-                return
-            avatar = _ac.fetch_channel_avatar(channel_live_url, channel_id)
-
-        if avatar:
-            for r in SCAN_STATE["results"]:
-                if r.get("id") == channel_id:
-                    r["avatar"] = avatar
-                    break
-
+        # 已命中内存缓存，无需重复 fetch
+        if _ac.get_cached_avatar(channel_id):
+            return
+        channel_live_url = (item.get("channel_live_url") or "").strip()
+        if not channel_live_url:
+            return
+        # ✔ 只做缓存预热，不写回 scan state（由 API 层派生）
+        _ac.fetch_channel_avatar(channel_live_url, channel_id)
     except Exception:
         pass
 
@@ -368,7 +359,7 @@ async def start_live_monitor_task(token: int) -> None:
     try:
         await asyncio.sleep(_MONITOR_INTERVAL_SEC)
         while token == _MONITOR_TOKEN and not SCAN_STATE_STORE.is_running:
-            current_items = list(SCAN_STATE["results"])
+            current_items = list(SCAN_STATE_STORE.get_snapshot()["results"])
             if not current_items:
                 break
 
