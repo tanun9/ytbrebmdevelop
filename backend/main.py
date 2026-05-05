@@ -60,25 +60,9 @@ def _setup_logger() -> logging.Logger:
 LOGGER = _setup_logger()
 
 
-# ── 全局 FastAPI 应用（供 uvicorn 使用）──────────────────────────────────────
-
-# 初始化各模块（注入依赖）
-_ac.init(
-    logger=LOGGER,
-    cache_file=os.path.join(_app_dir(), "channel_avatar_cache.json"),
-    cache_dir=os.path.join(_app_dir(), "avatar_cache"),
-)
-_sc.init(logger=LOGGER, app_dir_fn=_app_dir)
-
-app = build_app(
-    resource_dir=os.path.join(_resource_dir(), "static"),
-    app_dir_fn=_app_dir
-)
-
-
 # ── 服务器 ────────────────────────────────────────────────────────────────────
 
-def _run_server(host: str, port: int) -> None:
+def _run_server(app, host: str, port: int) -> None:
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
@@ -100,10 +84,10 @@ def _get_virtual_screen_rect() -> tuple[int, int, int, int] | None:
         return None
     try:
         import ctypes
-        u32    = ctypes.windll.user32
-        left   = u32.GetSystemMetrics(76)
-        top    = u32.GetSystemMetrics(77)
-        width  = u32.GetSystemMetrics(78)
+        u32 = ctypes.windll.user32
+        left = u32.GetSystemMetrics(76)
+        top = u32.GetSystemMetrics(77)
+        width = u32.GetSystemMetrics(78)
         height = u32.GetSystemMetrics(79)
         if width > 0 and height > 0:
             return left, top, width, height
@@ -122,8 +106,8 @@ def _get_centered_position(width: int, height: int) -> tuple[int, int]:
 
 def _is_window_visible(x: int, y: int, width: int, height: int, rect: tuple) -> bool:
     left, top, screen_w, screen_h = rect
-    right  = left + screen_w
-    bottom = top  + screen_h
+    right = left + screen_w
+    bottom = top + screen_h
     margin = 80
     return (
         (x + margin) < right
@@ -134,13 +118,13 @@ def _is_window_visible(x: int, y: int, width: int, height: int, rect: tuple) -> 
 
 
 def _sanitize_window_config(config: WindowConfig) -> WindowConfig:
-    width  = max(980, int(config.window_width))
+    width = max(980, int(config.window_width))
     height = max(680, int(config.window_height))
-    x, y   = config.window_x, config.window_y
-    rect   = _get_virtual_screen_rect()
+    x, y = config.window_x, config.window_y
+    rect = _get_virtual_screen_rect()
     if rect and x is not None and y is not None:
         left, top, screen_w, screen_h = rect
-        width  = min(width,  screen_w)
+        width = min(width, screen_w)
         height = min(height, screen_h)
         if not _is_window_visible(x, y, width, height, rect):
             x, y = _get_centered_position(width, height)
@@ -156,7 +140,8 @@ def _sanitize_window_config(config: WindowConfig) -> WindowConfig:
 # ── WebView2 GUI ──────────────────────────────────────────────────────────────
 
 def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
-    cfg    = _sanitize_window_config(cfg_manager.load())
+    cfg = _sanitize_window_config(cfg_manager.load())
+
     class _JsApi:
         def toggle_native_fullscreen(self):
             try:
@@ -181,16 +166,16 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
 
     def _on_closing():
         try:
-            x, y   = int(window.x), int(window.y)
-            width  = int(window.width)
+            x, y = int(window.x), int(window.y)
+            width = int(window.width)
             height = int(window.height)
-            rect   = _get_virtual_screen_rect()
+            rect = _get_virtual_screen_rect()
             if rect:
                 left, top, screen_w, screen_h = rect
-                width  = min(max(980, width),  screen_w)
+                width = min(max(980, width), screen_w)
                 height = min(max(680, height), screen_h)
-                x = max(left - width  + 80, min(x, left + screen_w - 80))
-                y = max(top  - height + 80, min(y, top  + screen_h - 80))
+                x = max(left - width + 80, min(x, left + screen_w - 80))
+                y = max(top - height + 80, min(y, top + screen_h - 80))
             cfg_manager.save(WindowConfig(
                 window_x=x, window_y=y,
                 window_width=width, window_height=height,
@@ -210,7 +195,7 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
             LOGGER.exception("Failed to apply zoom level.", exc_info=exc)
 
     window.events.closing += _on_closing
-    window.events.loaded  += _on_loaded
+    window.events.loaded += _on_loaded
 
     storage_path = os.path.join(_app_dir(), "webview_data")
     os.makedirs(storage_path, exist_ok=True)
@@ -242,29 +227,39 @@ def main() -> None:
     parser.add_argument("--mode", choices=["gui", "browser"], default="gui")
     args = parser.parse_args()
 
-    if getattr(sys, "frozen", False) and args.mode == "browser":
-        LOGGER.warning("Frozen executable does not allow --mode browser, force gui mode")
-        args.mode = "gui"
-
     LOGGER.info("Application startup: host=%s port=%s mode=%s", args.host, args.port, args.mode)
-    LOGGER.info("argv=%s", sys.argv)
 
     cfg_manager = ConfigManager(os.path.join(_app_dir(), "config.json"), LOGGER)
 
-    server_thread = threading.Thread(target=_run_server, args=(args.host, args.port), daemon=True)
+    # 初始化依赖
+    _ac.init(
+        logger=LOGGER,
+        cache_file=os.path.join(_app_dir(), "channel_avatar_cache.json"),
+        cache_dir=os.path.join(_app_dir(), "avatar_cache"),
+    )
+    _sc.init(logger=LOGGER, app_dir_fn=_app_dir)
+
+    # ✅ 正确创建 FastAPI app（传入 config_manager）
+    app = build_app(
+        resource_dir=os.path.join(_resource_dir(), "static"),
+        app_dir_fn=_app_dir,
+        config_manager=cfg_manager,
+    )
+
+    server_thread = threading.Thread(target=_run_server, args=(app, args.host, args.port), daemon=True)
     server_thread.start()
 
     if not _wait_server_ready(args.host, args.port):
-        LOGGER.error("Server failed to start: http://%s:%s", args.host, args.port)
-        raise RuntimeError(f"Server failed to start: http://{args.host}:{args.port}")
+        raise RuntimeError("Server failed to start")
 
-    app_url = f"http://{args.host}:{args.port}/"
+    url = f"http://{args.host}:{args.port}/"
+
     if args.mode == "browser":
-        webbrowser.open(app_url)
+        webbrowser.open(url)
         server_thread.join()
         return
 
-    _run_gui(app_url, cfg_manager)
+    _run_gui(url, cfg_manager)
 
 
 if __name__ == "__main__":
