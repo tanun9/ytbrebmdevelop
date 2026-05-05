@@ -1,5 +1,8 @@
 <template>
-  <div style="height:100%;display:flex;flex-direction:column">
+  <div class="app-shell">
+    <div class="bg-base"></div>
+    <div class="bg-overlay" :style="bgOverlayStyle"></div>
+    <div class="app-content">
     <!-- Tab Bar -->
     <div class="tab-bar">
       <h1>Y-VISION TERMINAL</h1>
@@ -56,6 +59,23 @@
             {{ t.label }}
           </span>
         </button>
+        <button class="icon-btn" title="上传背景" @click="triggerBackgroundUpload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 16V8"/>
+            <path d="M8.5 11.5 12 8l3.5 3.5"/>
+            <path d="M21 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-2"/>
+          </svg>
+        </button>
+        <button class="icon-btn" title="清除背景" @click="clearBackground">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+          </svg>
+        </button>
+        <button class="icon-btn" title="全屏" @click="toggleFullscreen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H3v5"/><path d="M16 3h5v5"/><path d="M21 16v5h-5"/><path d="M3 16v5h5"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -80,11 +100,14 @@
     <div id="scale-tip" :class="{ show: scaleVisible }">
       {{ scalePct }}%
     </div>
+    </div>
+    <input ref="bgInputEl" type="file" accept="image/*" class="hidden-input" @change="onBackgroundSelected" />
+    <div class="bottom-art-line" aria-hidden="true"></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import MonitorView from './components/MonitorView.vue'
 import PlayerView from './components/PlayerView.vue'
 import { appState } from './stores/appState'
@@ -103,9 +126,61 @@ let scaleTimer = null
 
 const BASE_W = 1440
 const BASE_FS = 16
+const bgInputEl = ref(null)
 
 // theme
 const { currentTheme, themeList, setTheme } = useTheme()
+const bgOverlayStyle = computed(() => {
+  if (!appState.userBackgroundUrl) {
+    return { opacity: 0 }
+  }
+
+  return {
+    backgroundImage: `url(${appState.userBackgroundUrl})`,
+    opacity: 0.38,
+  }
+})
+
+function triggerBackgroundUpload() {
+  bgInputEl.value?.click()
+}
+
+function onBackgroundSelected(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    appState.userBackgroundUrl = String(reader.result || '')
+    localStorage.setItem('yv_user_background', appState.userBackgroundUrl)
+    showToast('背景已更新并保存')
+    event.target.value = ''
+  }
+  reader.readAsDataURL(file)
+}
+
+function clearBackground() {
+  appState.userBackgroundUrl = ''
+  localStorage.removeItem('yv_user_background')
+  showToast('背景已清除')
+}
+
+async function toggleFullscreen() {
+  try {
+    if (window.pywebview?.api?.toggle_native_fullscreen) {
+      await window.pywebview.api.toggle_native_fullscreen()
+      return
+    }
+  } catch (_error) {
+    // fallback to browser fullscreen below
+  }
+
+  if (!document.fullscreenElement) {
+    await document.documentElement.requestFullscreen()
+  } else {
+    await document.exitFullscreen()
+  }
+}
 
 function applyScale() {
   const fs = Math.min(20, Math.max(10, (window.innerWidth / BASE_W) * BASE_FS))
@@ -153,6 +228,10 @@ function onResize() {
 }
 
 onMounted(() => {
+  const savedBackground = localStorage.getItem('yv_user_background')
+  if (savedBackground) {
+    appState.userBackgroundUrl = savedBackground
+  }
   applyScale()
   window.addEventListener('resize', onResize)
 })
@@ -165,6 +244,75 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.bg-base,
+.bg-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.bg-base {
+  background:
+    radial-gradient(70% 80% at 0% 0%, color-mix(in srgb, var(--primary2) 14%, transparent), transparent 75%),
+    radial-gradient(60% 70% at 100% 100%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 72%);
+}
+
+.bg-overlay {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  transition: opacity .25s ease;
+}
+
+.app-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.3rem;
+  border-radius: 8px;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.icon-btn svg { width: 16px; height: 16px; }
+.icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+.hidden-input { display: none; }
+
+.bottom-art-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--primary2) 55%, transparent) 18%,
+    color-mix(in srgb, var(--primary) 75%, transparent) 50%,
+    color-mix(in srgb, var(--primary2) 55%, transparent) 82%,
+    transparent 100%);
+  box-shadow:
+    0 0 10px color-mix(in srgb, var(--primary2) 35%, transparent),
+    0 -1px 10px color-mix(in srgb, var(--primary) 20%, transparent);
+  z-index: 5;
+}
 /* ── Tab Bar 优化 ── */
 .tab-bar {
   display: flex;
