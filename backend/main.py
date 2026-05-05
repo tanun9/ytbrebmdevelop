@@ -157,6 +157,17 @@ def _sanitize_window_config(config: WindowConfig) -> WindowConfig:
 
 def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
     cfg    = _sanitize_window_config(cfg_manager.load())
+    class _JsApi:
+        def toggle_native_fullscreen(self):
+            try:
+                window.toggle_fullscreen()
+                return {"ok": True}
+            except Exception as exc:
+                LOGGER.exception("toggle_native_fullscreen failed", exc_info=exc)
+                return {"ok": False, "error": str(exc)}
+
+    js_api = _JsApi()
+
     window = webview.create_window(
         "YVmonitor",
         url=url,
@@ -165,6 +176,7 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
         min_size=(980, 680),
         x=cfg.window_x,
         y=cfg.window_y,
+        js_api=js_api,
     )
 
     def _on_closing():

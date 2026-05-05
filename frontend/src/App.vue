@@ -59,13 +59,19 @@
             {{ t.label }}
           </span>
         </button>
-        <button class="icon-btn" title="上传背景" @click="triggerBackgroundUpload">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 16V8"/>
-            <path d="M8.5 11.5 12 8l3.5 3.5"/>
-            <path d="M21 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-2"/>
-          </svg>
-        </button>
+        <div class="bg-menu-wrap">
+          <button class="icon-btn" title="背景设置" @click.stop="toggleBgMenu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16V8"/>
+              <path d="M8.5 11.5 12 8l3.5 3.5"/>
+              <path d="M21 16.5v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-2"/>
+            </svg>
+          </button>
+          <div v-if="bgMenuOpen" class="bg-menu" @click.stop>
+            <button class="bg-menu-item" @click="handleUploadClick">上传背景</button>
+            <button class="bg-menu-item danger" @click="handleClearClick">清除背景</button>
+          </div>
+        </div>
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 3H3v5"/><path d="M16 3h5v5"/><path d="M21 16v5h-5"/><path d="M3 16v5h5"/>
@@ -122,6 +128,7 @@ let scaleTimer = null
 const BASE_W = 1440
 const BASE_FS = 16
 const bgInputEl = ref(null)
+const bgMenuOpen = ref(false)
 
 // theme
 const { currentTheme, themeList, setTheme } = useTheme()
@@ -140,26 +147,55 @@ function triggerBackgroundUpload() {
   bgInputEl.value?.click()
 }
 
+function toggleBgMenu() {
+  bgMenuOpen.value = !bgMenuOpen.value
+}
+
+function handleUploadClick() {
+  bgMenuOpen.value = false
+  triggerBackgroundUpload()
+}
+
+function handleClearClick() {
+  bgMenuOpen.value = false
+  clearBackground()
+}
+
 function onBackgroundSelected(event) {
   const file = event.target.files?.[0]
   if (!file) return
 
-  if (appState.userBackgroundUrl) {
-    URL.revokeObjectURL(appState.userBackgroundUrl)
+  const reader = new FileReader()
+  reader.onload = () => {
+    appState.userBackgroundUrl = String(reader.result || '')
+    localStorage.setItem('yv_user_background', appState.userBackgroundUrl)
+    showToast('背景已保存')
+    event.target.value = ''
   }
+  reader.readAsDataURL(file)
+}
 
-  appState.userBackgroundUrl = URL.createObjectURL(file)
-  showToast('背景已更新')
-  event.target.value = ''
+function clearBackground() {
+  appState.userBackgroundUrl = ''
+  localStorage.removeItem('yv_user_background')
+  showToast('背景已清除')
 }
 
 async function toggleFullscreen() {
-  if (!document.fullscreenElement) {
-    await document.documentElement.requestFullscreen()
-    return
+  try {
+    if (window.pywebview?.api?.toggle_native_fullscreen) {
+      await window.pywebview.api.toggle_native_fullscreen()
+      return
+    }
+  } catch (_error) {
+    // fallback to browser fullscreen below
   }
 
-  await document.exitFullscreen()
+  if (!document.fullscreenElement) {
+    await document.documentElement.requestFullscreen()
+  } else {
+    await document.exitFullscreen()
+  }
 }
 
 function applyScale() {
@@ -207,13 +243,23 @@ function onResize() {
   applyScale()
 }
 
+function onGlobalClick() {
+  bgMenuOpen.value = false
+}
+
 onMounted(() => {
+  const savedBackground = localStorage.getItem('yv_user_background')
+  if (savedBackground) {
+    appState.userBackgroundUrl = savedBackground
+  }
   applyScale()
   window.addEventListener('resize', onResize)
+  window.addEventListener('click', onGlobalClick)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
+  window.removeEventListener('click', onGlobalClick)
   clearTimeout(toastTimer)
   clearTimeout(scaleTimer)
   if (appState.userBackgroundUrl) {
@@ -272,6 +318,38 @@ onUnmounted(() => {
 
 .icon-btn svg { width: 16px; height: 16px; }
 .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+.bg-menu-wrap {
+  position: relative;
+}
+
+.bg-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 104px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 80;
+}
+
+.bg-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bg-menu-item:hover { background: rgba(255,255,255,0.08); }
+.bg-menu-item.danger { color: #ff9fae; }
 
 .hidden-input { display: none; }
 
