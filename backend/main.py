@@ -215,7 +215,6 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
         width=splash_width,
         height=splash_height,
         min_size=(splash_width, splash_height),
-        max_size=(splash_width, splash_height),
         x=splash_x,
         y=splash_y,
         frameless=True,
