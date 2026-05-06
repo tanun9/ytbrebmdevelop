@@ -176,8 +176,6 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
 </style></head>
 <body><div class="logo-wrap"><img class="logo" src="data:image/svg+xml;base64,{splash_logo_b64}" alt="loading logo"></div></body></html>
 """
-    splash_url = f"data:text/html;base64,{base64.b64encode(splash_html.encode('utf-8')).decode('ascii')}"
-
     splash_width = 320
     splash_height = 320
     splash_x, splash_y = _get_centered_position(splash_width, splash_height)
@@ -211,7 +209,7 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
 
     splash_window = webview.create_window(
         "YVmonitor Loading",
-        url=splash_url,
+        html=splash_html,
         width=splash_width,
         height=splash_height,
         min_size=(splash_width, splash_height),
