@@ -6,6 +6,7 @@ main.py
 """
 
 import argparse
+import base64
 import inspect
 import logging
 import os
@@ -141,11 +142,66 @@ def _sanitize_window_config(config: WindowConfig) -> WindowConfig:
 
 def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
     cfg = _sanitize_window_config(cfg_manager.load())
+    splash_closed = False
+    ready_signaled = False
+    switch_lock = threading.Lock()
+
+    splash_logo_svg = """
+<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'>
+  <defs>
+    <linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'>
+      <stop offset='0%' stop-color='#5b8dff'/>
+      <stop offset='100%' stop-color='#7f52ff'/>
+    </linearGradient>
+  </defs>
+  <rect x='0' y='0' width='320' height='320' rx='78' fill='url(#g1)' />
+  <path d='M95 84h44l24 42 24-42h38l-44 74 47 78h-44l-27-46-27 46H86l47-78z' fill='white' opacity='0.95'/>
+</svg>
+""".strip()
+    splash_logo_b64 = base64.b64encode(splash_logo_svg.encode("utf-8")).decode("ascii")
+    splash_html = f"""<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loading</title>
+<style>
+  html, body {{ margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }}
+  body {{ display: flex; align-items: center; justify-content: center; }}
+  .logo-wrap {{ width: 280px; height: 280px; display: flex; align-items: center; justify-content: center; border-radius: 72px; }}
+  .logo-wrap::before {{
+    content: ""; position: absolute; width: 290px; height: 290px; border-radius: 78px;
+    background: radial-gradient(circle, rgba(88, 111, 255, 0.58) 0%, rgba(104, 78, 255, 0.34) 50%, rgba(92, 104, 255, 0.00) 75%);
+    filter: blur(7px); animation: glow 1.6s ease-in-out infinite alternate;
+  }}
+  .logo {{ width: 256px; height: 256px; position: relative; z-index: 1; user-select: none; -webkit-user-drag: none; }}
+  @keyframes glow {{ from {{ transform: scale(0.96); opacity: 0.75; }} to {{ transform: scale(1.04); opacity: 1; }} }}
+</style></head>
+<body><div class="logo-wrap"><img class="logo" src="data:image/svg+xml;base64,{splash_logo_b64}" alt="loading logo"></div></body></html>
+"""
+    splash_url = f"data:text/html;base64,{base64.b64encode(splash_html.encode('utf-8')).decode('ascii')}"
+
+    splash_width = 320
+    splash_height = 320
+    splash_x, splash_y = _get_centered_position(splash_width, splash_height)
 
     class _JsApi:
+        def notify_ready(self):
+            nonlocal splash_closed, ready_signaled
+            with switch_lock:
+                ready_signaled = True
+                if splash_closed:
+                    return {"ok": True, "already": True}
+                try:
+                    main_window.show()
+                    splash_window.destroy()
+                    splash_closed = True
+                    LOGGER.info("Startup splash closed by frontend ready signal.")
+                    return {"ok": True}
+                except Exception as exc:
+                    LOGGER.exception("Failed to switch to main window after ready signal.", exc_info=exc)
+                    return {"ok": False, "error": str(exc)}
+
         def toggle_native_fullscreen(self):
             try:
-                window.toggle_fullscreen()
+                main_window.toggle_fullscreen()
                 return {"ok": True}
             except Exception as exc:
                 LOGGER.exception("toggle_native_fullscreen failed", exc_info=exc)
@@ -153,7 +209,20 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
 
     js_api = _JsApi()
 
-    window = webview.create_window(
+    splash_window = webview.create_window(
+        "YVmonitor Loading",
+        url=splash_url,
+        width=splash_width,
+        height=splash_height,
+        min_size=(splash_width, splash_height),
+        x=splash_x,
+        y=splash_y,
+        frameless=True,
+        transparent=True,
+        on_top=True,
+    )
+
+    main_window = webview.create_window(
         "YVmonitor",
         url=url,
         width=cfg.window_width,
@@ -162,13 +231,14 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
         x=cfg.window_x,
         y=cfg.window_y,
         js_api=js_api,
+        hidden=True,
     )
 
     def _on_closing():
         try:
-            x, y = int(window.x), int(window.y)
-            width = int(window.width)
-            height = int(window.height)
+            x, y = int(main_window.x), int(main_window.y)
+            width = int(main_window.width)
+            height = int(main_window.height)
             rect = _get_virtual_screen_rect()
             if rect:
                 left, top, screen_w, screen_h = rect
@@ -189,13 +259,13 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
     def _on_loaded():
         try:
             if cfg.zoom_level and cfg.zoom_level > 0 and cfg.zoom_level != 1.0:
-                window.evaluate_js(f"document.body.style.zoom = '{cfg.zoom_level}';")
+                main_window.evaluate_js(f"document.body.style.zoom = '{cfg.zoom_level}';")
                 LOGGER.info("Applied zoom_level=%s", cfg.zoom_level)
         except Exception as exc:
             LOGGER.exception("Failed to apply zoom level.", exc_info=exc)
 
-    window.events.closing += _on_closing
-    window.events.loaded += _on_loaded
+    main_window.events.closing += _on_closing
+    main_window.events.loaded += _on_loaded
 
     storage_path = os.path.join(_app_dir(), "webview_data")
     os.makedirs(storage_path, exist_ok=True)
@@ -209,6 +279,21 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
         start_kwargs["storage_path"] = storage_path
 
     try:
+        def _startup_timeout() -> None:
+            nonlocal splash_closed
+            time.sleep(10)
+            with switch_lock:
+                if splash_closed or ready_signaled:
+                    return
+                try:
+                    main_window.show()
+                    splash_window.destroy()
+                    splash_closed = True
+                    LOGGER.warning("Startup ready signal timeout(10s), forced main window show.")
+                except Exception as exc:
+                    LOGGER.exception("Failed to force show main window after startup timeout.", exc_info=exc)
+
+        threading.Thread(target=_startup_timeout, daemon=True).start()
         webview.start(**start_kwargs)
     except Exception as exc:
         LOGGER.exception("WebView2 initialization failed.", exc_info=exc)
