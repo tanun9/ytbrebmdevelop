@@ -269,6 +269,9 @@ onMounted(async () => {
   window.addEventListener('click', onGlobalClick)
   // 恢复持久化背景
   await restoreBackground()
+  if (typeof window.__notifyPywebviewReady === 'function') {
+    await window.__notifyPywebviewReady()
+  }
 })
 
 onUnmounted(() => {
