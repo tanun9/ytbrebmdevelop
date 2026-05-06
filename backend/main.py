@@ -147,15 +147,25 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
     switch_lock = threading.Lock()
 
     splash_logo_svg = """
-<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
   <defs>
-    <linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='100%'>
-      <stop offset='0%' stop-color='#5b8dff'/>
-      <stop offset='100%' stop-color='#7f52ff'/>
+    <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="nnneon-grad">
+      <stop stop-color="hsl(157, 100%, 54%)" offset="0%"/>
+      <stop stop-color="hsl(331, 87%, 61%)" offset="100%"/>
     </linearGradient>
+    <filter id="nnneon-filter" x="-100%" y="-100%" width="400%" height="400%">
+      <feGaussianBlur stdDeviation="17 8"/>
+    </filter>
+    <filter id="nnneon-filter2" x="-100%" y="-100%" width="400%" height="400%">
+      <feGaussianBlur stdDeviation="10 17"/>
+    </filter>
   </defs>
-  <rect x='0' y='0' width='320' height='320' rx='78' fill='url(#g1)' />
-  <path d='M95 84h44l24 42 24-42h38l-44 74 47 78h-44l-27-46-27 46H86l47-78z' fill='white' opacity='0.95'/>
+  <g stroke-width="16" stroke="url(#nnneon-grad)" fill="none" transform="rotate(90, 400, 400)">
+    <polygon points="400,50 50,750 750,750" filter="url(#nnneon-filter)"/>
+    <polygon points="412,50 62,750 762,750" filter="url(#nnneon-filter2)" opacity="0.25"/>
+    <polygon points="388,50 38,750 738,750" filter="url(#nnneon-filter2)" opacity="0.25"/>
+    <polygon points="400,50 50,750 750,750"/>
+  </g>
 </svg>
 """.strip()
     splash_logo_b64 = base64.b64encode(splash_logo_svg.encode("utf-8")).decode("ascii")
@@ -166,13 +176,6 @@ def _run_gui(url: str, cfg_manager: ConfigManager) -> None:
   html, body {{ margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }}
   body {{ display: flex; align-items: center; justify-content: center; }}
   .logo-wrap {{ width: 280px; height: 280px; display: flex; align-items: center; justify-content: center; border-radius: 72px; }}
-  .logo-wrap::before {{
-    content: ""; position: absolute; width: 290px; height: 290px; border-radius: 78px;
-    background: radial-gradient(circle, rgba(88, 111, 255, 0.58) 0%, rgba(104, 78, 255, 0.34) 50%, rgba(92, 104, 255, 0.00) 75%);
-    filter: blur(7px); animation: glow 1.6s ease-in-out infinite alternate;
-  }}
-  .logo {{ width: 256px; height: 256px; position: relative; z-index: 1; user-select: none; -webkit-user-drag: none; }}
-  @keyframes glow {{ from {{ transform: scale(0.96); opacity: 0.75; }} to {{ transform: scale(1.04); opacity: 1; }} }}
 </style></head>
 <body><div class="logo-wrap"><img class="logo" src="data:image/svg+xml;base64,{splash_logo_b64}" alt="loading logo"></div></body></html>
 """
