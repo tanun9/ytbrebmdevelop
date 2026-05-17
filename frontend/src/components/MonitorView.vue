@@ -1,8 +1,17 @@
 <template>
   <div id="view-monitor" class="view" :class="{ active: active }">
     <!-- Toolbar -->
+
+
+    <div class="network-status-bar">
+      <span v-if="isChecking">🟡 检测中...</span>
+      <span v-else-if="networkState.youtube_available">🟢 当前线路可用</span>
+      <span v-else>🔴 当前线路被 YouTube 风控</span>
+      <button class="mon-action-btn" :disabled="isChecking" @click="checkNetwork(true)">检测 YouTube 连接性</button>
+    </div>
+
     <div class="monitor-toolbar" ref="toolbarEl">
-      <button id="mon-btn" class="mon-action-btn" :disabled="scanRunning" @click="startScan">
+      <button id="mon-btn" class="mon-action-btn" :disabled="scanRunning || isChecking || !networkState.youtube_available" @click="startScan">
         {{ scanRunning ? '扫描中…' : '同步序列' }}
       </button>
       <span id="mon-progress">{{ statusText }}</span>
@@ -29,6 +38,7 @@
         >✕</button>
       </div>
     </div>
+
 
     <!-- Search dropdown (absolutely positioned inside view) -->
     <SearchDropdown
@@ -60,6 +70,7 @@ import Fuse from 'fuse.js'
 import MonCard from './MonCard.vue'
 import SearchDropdown from './SearchDropdown.vue'
 import { useApiClient } from '../composables/useApiClient.js'
+import { useNetworkProbe } from '../composables/useNetworkProbe.js'
 import { appState } from '../stores/appState.js'
 import { monItemKey, extractHandleFromUrl } from '../composables/useDomUtils.js'
 
@@ -67,6 +78,7 @@ const props = defineProps({ active: Boolean })
 const emit = defineEmits(['send-to-player'])
 
 const { refreshScan, getStatus, getChannels } = useApiClient()
+const { isChecking, networkState, runProbe, loadStatus } = useNetworkProbe()
 
 const scanRunning = ref(false)
 const statusText = ref('')
@@ -83,9 +95,18 @@ const pendingAvatarIds = new Set()
 const renderedKeys = new Set()
 let avatarPollGeneration = 0   // 每次新扫描递增，用于取消过期的 avatar 轮询
 
+async function checkNetwork(force = false) {
+  await runProbe(force)
+}
+
 // --- Scan ---
 
 async function startScan() {
+  if (!networkState.value.youtube_available) {
+    statusText.value = '网络不可用，无法扫描'
+    return
+  }
+
   clearInterval(pollTimer)
   pollTimer = null
   renderedKeys.clear()
@@ -200,6 +221,9 @@ function pollPendingAvatars(attempt, generation) {
 // --- Search ---
 
 onMounted(async () => {
+  await loadStatus()
+  await checkNetwork(false)
+
   // Load initial status
   try {
     const state = await getStatus()
@@ -301,3 +325,7 @@ function onLiveFound(result) {
   }
 }
 </script>
+
+<style scoped>
+.network-status-bar { display:flex; align-items:center; gap:12px; padding:8px 12px; border-bottom:1px solid var(--border); }
+</style>
