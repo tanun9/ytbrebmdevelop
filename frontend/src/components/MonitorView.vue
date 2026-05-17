@@ -4,10 +4,40 @@
 
 
     <div class="network-status-bar">
-      <span v-if="isChecking">🟡 检测中...</span>
-      <span v-else-if="networkState.youtube_available">🟢 当前线路可用</span>
-      <span v-else>🔴 当前线路被 YouTube 风控</span>
-      <button class="mon-action-btn" :disabled="isChecking" @click="checkNetwork(true)">检测 YouTube 连接性</button>
+
+      <button
+        class="mon-action-btn"
+        :disabled="isChecking"
+        @click="checkNetwork(true)"
+      >
+        检测 YouTube 连接性
+      </button>
+
+      <div class="network-status">
+        <span
+          class="status-dot"
+          :class="{
+            checking: isChecking,
+            online: !isChecking && networkState.youtube_available,
+            blocked: !isChecking && !networkState.youtube_available
+          }"
+        ></span>
+
+        <span class="status-text">
+          <template v-if="isChecking">
+            检测中...
+          </template>
+
+          <template v-else-if="networkState.youtube_available">
+            当前线路可用
+          </template>
+
+          <template v-else>
+            当前线路被 YouTube 风控
+          </template>
+        </span>
+      </div>
+
     </div>
 
     <div class="monitor-toolbar" ref="toolbarEl">
@@ -327,5 +357,96 @@ function onLiveFound(result) {
 </script>
 
 <style scoped>
-.network-status-bar { display:flex; align-items:center; gap:12px; padding:8px 12px; border-bottom:1px solid var(--border); }
+.network-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+
+  padding: 0.7rem 1.2rem;
+
+  background:
+    linear-gradient(
+      90deg,
+      rgba(20,10,40,.92),
+      rgba(12,8,28,.92)
+    );
+
+  border-bottom: 1px solid rgba(120,80,200,.18);
+
+  font-size: 0.82rem;
+}
+
+.network-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+
+  min-width: 12rem;
+}
+
+.status-text {
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+
+  color: #d8cff7;
+
+  font-family:
+    "Inter",
+    "PingFang SC",
+    sans-serif;
+}
+
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+
+  border-radius: 50%;
+
+  flex-shrink: 0;
+
+  position: relative;
+}
+
+.status-dot.online {
+  background: #52ffb8;
+
+  box-shadow:
+    0 0 8px rgba(82,255,184,.8),
+    0 0 16px rgba(82,255,184,.35);
+}
+
+.status-dot.blocked {
+  background: #ff4d6d;
+
+  box-shadow:
+    0 0 8px rgba(255,77,109,.75),
+    0 0 16px rgba(255,77,109,.3);
+}
+
+.status-dot.checking {
+  background: #ffd166;
+
+  animation: pulse-status 1.2s ease-in-out infinite;
+
+  box-shadow:
+    0 0 10px rgba(255,209,102,.7);
+}
+
+@keyframes pulse-status {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.4);
+    opacity: .6;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
 </style>
