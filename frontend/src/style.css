@@ -163,7 +163,15 @@ body::after {
   flex-shrink: 0;
   position: relative;
 }
-#mon-progress { font-size: 0.75rem; color: var(--muted); margin-right: auto }
+#mon-progress {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mon-action-btn {
   padding: 0.375rem 0.8rem;
   background: var(--mon-btn-bg);

@@ -1,9 +1,7 @@
 <template>
   <div id="view-monitor" class="view" :class="{ active: active }">
-    <!-- Toolbar -->
-
-
-    <div class="network-status-bar">
+    <div class="monitor-toolbar" ref="toolbarEl">
+      <div class="network-status-bar">
 
       <button
         class="mon-action-btn"
@@ -38,34 +36,40 @@
         </span>
       </div>
 
-    </div>
+      </div>
 
-    <div class="monitor-toolbar" ref="toolbarEl">
-      <button id="mon-btn" class="mon-action-btn" :disabled="scanRunning || isChecking || !networkState.youtube_available" @click="startScan">
-        {{ scanRunning ? '扫描中…' : '同步序列' }}
-      </button>
       <span id="mon-progress">{{ statusText }}</span>
 
-      <!-- Search -->
-      <div class="search-wrap" id="search-wrap" ref="searchWrapEl">
-        <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/>
-        </svg>
-        <input
-          class="search-input"
-          id="search-input"
-          ref="searchInputEl"
-          v-model="searchQuery"
-          placeholder="频道检索…"
-          @input="onSearchInput"
-          @keydown.esc="closeDropdown"
-          @focus="onSearchFocus"
-        />
+      <div class="toolbar-right">
         <button
-          class="search-clear"
-          :class="{ visible: searchQuery.length > 0 }"
-          @click="clearSearch"
-        >✕</button>
+          id="mon-btn"
+          class="mon-action-btn"
+          :disabled="scanRunning || isChecking || !networkState.youtube_available"
+          @click="startScan"
+        >
+          {{ scanRunning ? '扫描中…' : '同步序列' }}
+        </button>
+
+        <div class="search-wrap" id="search-wrap" ref="searchWrapEl">
+          <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/>
+          </svg>
+          <input
+            class="search-input"
+            id="search-input"
+            ref="searchInputEl"
+            v-model="searchQuery"
+            placeholder="频道检索…"
+            @input="onSearchInput"
+            @keydown.esc="closeDropdown"
+            @focus="onSearchFocus"
+          />
+          <button
+            class="search-clear"
+            :class="{ visible: searchQuery.length > 0 }"
+            @click="clearSearch"
+          >✕</button>
+        </div>
       </div>
     </div>
 
@@ -363,41 +367,37 @@ function onLiveFound(result) {
 .network-status-bar {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
-
-  padding: 0.7rem 1.2rem;
-
-  background:
-    linear-gradient(
-      90deg,
-      rgba(20,10,40,.92),
-      rgba(12,8,28,.92)
-    );
-
-  border-bottom: 1px solid rgba(120,80,200,.18);
-
-  font-size: 0.82rem;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  padding-right: 0.85rem;
+  margin-right: 0.15rem;
+  border-right: 1px solid var(--border);
 }
 
 .network-status {
   display: flex;
   align-items: center;
   gap: 0.55rem;
+  min-width: 0;
+}
 
-  min-width: 12rem;
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.toolbar-right .search-wrap {
+  flex: 0 1 22rem;
+  width: 22rem;
+  max-width: 26rem;
 }
 
 .status-text {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-
-  color: #d8cff7;
-
-  font-family:
-    "Inter",
-    "PingFang SC",
-    sans-serif;
+  color: var(--muted);
 }
 
 .status-dot {

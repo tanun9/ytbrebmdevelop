@@ -24,6 +24,7 @@ import time
 import urllib.parse
 
 from .avatar_cache_components import AvatarDiskCache, ChannelAvatarMemoryCache
+from .avatar_innertube import fetch_avatar_via_innertube
 
 AVATAR_CACHE_MAX_BYTES      = 80 * 1024 * 1024
 AVATAR_CACHE_MAX_AGE_SEC    = 30 * 24 * 3600
@@ -80,6 +81,13 @@ def save_channel_avatar_cache() -> None:
 
 def _set_channel_cache(channel_id: str, avatar_url: str) -> None:
     _memory_cache.set(channel_id, avatar_url)
+
+
+def _persist_avatar(channel_id: str, avatar_url: str) -> str:
+    _set_channel_cache(channel_id, avatar_url)
+    save_channel_avatar_cache()
+    _log("info", "[avatar-cache] saved channel_id=%s", channel_id)
+    return avatar_proxy_url(avatar_url)
 
 
 # ── 磁盘图片缓存 ──────────────────────────────────────────────────────────────
@@ -153,10 +161,7 @@ def fetch_channel_avatar(channel_url: str, channel_id: str) -> str:
                     if not avatar_url:
                         raise Exception("empty avatar url")
 
-                    _set_channel_cache(channel_id, avatar_url)
-                    save_channel_avatar_cache()
-                    _log("info", "[avatar-cache] saved channel_id=%s", channel_id)
-                    return avatar_proxy_url(avatar_url)
+                    return _persist_avatar(channel_id, avatar_url)
 
             except Exception as e:
                 _log(
@@ -168,6 +173,11 @@ def fetch_channel_avatar(channel_url: str, channel_id: str) -> str:
                 )
                 if attempt == 0:
                     time.sleep(1)
+
+        if channel_id:
+            fallback_url = fetch_avatar_via_innertube(channel_id)
+            if fallback_url:
+                return _persist_avatar(channel_id, fallback_url)
     finally:
         with _inflight_fetch_lock:
             _inflight_fetch.discard(inflight_key)
